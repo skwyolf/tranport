@@ -1,0 +1,7 @@
+{
+  "name": "MAPA LUPUS",
+  "description": "Interactive logistics dashboard for agricultural machinery delivery. Integrates with Pipedrive for project tracking and Nominatim for geocoding, visualizing delivery routes on a map. (Note: Implemented in React/TypeScript for superior interactivity and performance).",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
