@@ -258,7 +258,10 @@ const App: React.FC = () => {
       {/* Map Area */}
       <div className="flex-1 relative h-full z-0">
         <MapContainer center={[DEFAULTS.CENTER_LAT, DEFAULTS.CENTER_LNG]} zoom={DEFAULTS.ZOOM} style={{ height: '100%', width: '100%' }}>
-          <TileLayer attribution='&copy; OSM contributors' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+          <TileLayer
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+            url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+          />
           <MapUpdater center={mapCenter} zoom={mapZoom} />
 
           {/* 1. BAZA LUPUS MARKER */}
