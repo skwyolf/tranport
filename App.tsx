@@ -63,12 +63,6 @@ const LUPUS_BASE = {
   type: 'transport' as const
 };
 
-// Ograniczenie obszaru do Polski
-const polandBounds: L.LatLngBoundsExpression = [
-  [49.00, 14.00], // Południowy Zachód
-  [54.50, 24.15]  // Północny Wschód
-];
-
 // Helper to change map view
 function MapUpdater({ center, zoom }: { center: [number, number], zoom: number }) {
   const map = useMap();
@@ -294,18 +288,15 @@ const App: React.FC = () => {
         <MapContainer 
           center={[52.06, 19.25]} 
           zoom={6}
-          minZoom={6}
-          maxZoom={10}
-          maxBounds={polandBounds}
-          maxBoundsViscosity={1.0}
+          minZoom={5}
+          maxZoom={18}
           scrollWheelZoom={true}
-          style={{ height: '100%', width: '100%' }}
+          style={{ height: '100%', width: '100%', minHeight: '100vh' }}
+          className="flex-1 h-full w-full z-0"
         >
           <TileLayer
             url="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}"
             attribution="&copy; Google Maps"
-            minZoom={6}
-            maxZoom={10} 
           />
           <MapUpdater center={mapCenter} zoom={mapZoom} />
 
