@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { LogisticsProject } from '../types';
-import { Search, AlertTriangle, CheckCircle, MapPin, Truck, Settings, Phone, User, Layers, Check, Loader2, Map, X, ExternalLink, Copy, Star, Pencil, Save, Filter } from 'lucide-react';
+import { Search, AlertTriangle, CheckCircle, MapPin, Truck, Settings, Phone, User, Layers, Check, Loader2, Map, X, ExternalLink, Copy, Star, Pencil, Save, Filter, RefreshCw } from 'lucide-react';
 
 interface SidebarProps {
   projects: LogisticsProject[];
@@ -21,6 +21,8 @@ interface SidebarProps {
   // Filtering Props
   filters: { transport: boolean; service: boolean };
   onToggleFilter: (type: 'transport' | 'service') => void;
+  // Force Refresh
+  onRefresh: () => void;
 }
 
 // Helper: Haversine Distance in KM
@@ -50,7 +52,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   route,
   setRoute,
   filters,
-  onToggleFilter
+  onToggleFilter,
+  onRefresh
 }) => {
   const [filterText, setFilterText] = useState('');
   const [showErrorsOnly, setShowErrorsOnly] = useState(false);
@@ -156,9 +159,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </h1>
           <p className="text-[11px] text-slate-400 mt-1 uppercase tracking-wider font-semibold">Logistics Control Center</p>
         </div>
-        <button onClick={() => setConfigOpen(!configOpen)} className="p-2 hover:bg-slate-700 rounded-full transition text-slate-300 hover:text-white">
-          <Settings className="w-5 h-5" />
-        </button>
+        <div className="flex items-center gap-1">
+            <button 
+                onClick={onRefresh} 
+                disabled={isLoading}
+                className={`p-2 rounded-full transition text-slate-300 hover:text-white hover:bg-slate-700 ${isLoading ? 'animate-spin' : ''}`}
+                title="Odśwież dane z Pipedrive"
+            >
+                <RefreshCw className="w-5 h-5" />
+            </button>
+            <button onClick={() => setConfigOpen(!configOpen)} className="p-2 hover:bg-slate-700 rounded-full transition text-slate-300 hover:text-white">
+                <Settings className="w-5 h-5" />
+            </button>
+        </div>
       </div>
 
       {/* ROUTING PANEL (TIMELINE STYLE) */}

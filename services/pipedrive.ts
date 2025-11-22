@@ -33,6 +33,23 @@ export const getCachedProjects = (): LogisticsProject[] | null => {
   return null;
 };
 
+/**
+ * Removes a specific project from LocalStorage to prevent "Ghost Effect"
+ * where completed projects reappear on reload.
+ */
+export const removeProjectFromCache = (projectId: number) => {
+  try {
+    const cached = getCachedProjects();
+    if (cached) {
+      const updated = cached.filter(p => p.id !== projectId);
+      localStorage.setItem(CACHE_KEY, JSON.stringify(updated));
+      console.log(`👻 Usunięto projekt ID ${projectId} z cache.`);
+    }
+  } catch (e) {
+    console.error("Błąd aktualizacji cache:", e);
+  }
+};
+
 export const fetchPipedriveProjects = async (apiKey: string, useMock: boolean): Promise<LogisticsProject[]> => {
   if (useMock) {
     console.log("Używanie danych testowych (Mock)...");

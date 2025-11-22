@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline } from 'react-leaflet';
 import L from 'leaflet';
 import { Sidebar } from './components/Sidebar';
-import { fetchPipedriveProjects, advanceProjectStage, updatePersonAddress, getCachedProjects } from './services/pipedrive';
+import { fetchPipedriveProjects, advanceProjectStage, updatePersonAddress, getCachedProjects, removeProjectFromCache } from './services/pipedrive';
 import { geocodeAddress } from './services/geocoding';
 import { LogisticsProject, DEFAULTS } from './types';
 import { Phone, User, Layers, Bot, Wrench, Truck } from 'lucide-react';
@@ -111,6 +111,21 @@ const App: React.FC = () => {
     setVisibleFilters(prev => ({ ...prev, [type]: !prev[type] }));
   };
 
+  // --- FORCE REFRESH LOGIC ---
+  const handleForceRefresh = async () => {
+    console.log("🔄 Force Refresh triggered by user.");
+    setIsLoading(true);
+    try {
+      const data = await fetchPipedriveProjects(pipedriveKey, useMock);
+      setProjects(data);
+      console.log('✅ Dane odświeżone z Pipedrive');
+    } catch (err) {
+      console.error('Błąd podczas odświeżania:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleMarkDelivered = async (id: number) => {
     console.log("🚀 App: Rozpoczynam procedurę dla ID:", id);
     
@@ -128,6 +143,9 @@ const App: React.FC = () => {
         setProjects(prev => prev.filter(p => p.id !== id));
         setRoute(prev => prev.filter(r => r.id !== id));
         
+        // NAPRAWA "GHOST EFFECT": Usuń z cache od razu po sukcesie
+        removeProjectFromCache(id);
+
         if (selectedProjectId === id) {
           setSelectedProjectId(null);
           setAiAdvice(null);
@@ -270,6 +288,7 @@ const App: React.FC = () => {
             setRoute={setRoute}
             filters={visibleFilters}
             onToggleFilter={handleToggleFilter}
+            onRefresh={handleForceRefresh}
         />
       </div>
 
