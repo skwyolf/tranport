@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline } from 'react-leaflet';
 import L from 'leaflet';
 import { Sidebar } from './components/Sidebar';
-import { fetchPipedriveProjects, advanceProjectStage, updatePersonAddress } from './services/pipedrive';
+import { fetchPipedriveProjects, advanceProjectStage, updatePersonAddress, getCachedProjects } from './services/pipedrive';
 import { geocodeAddress } from './services/geocoding';
 import { LogisticsProject, DEFAULTS } from './types';
 import { Phone, User, Layers, Bot, Wrench, Truck } from 'lucide-react';
@@ -63,6 +63,12 @@ const LUPUS_BASE = {
   type: 'transport' as const
 };
 
+// Ograniczenie obszaru do Polski
+const polandBounds: L.LatLngBoundsExpression = [
+  [49.00, 14.00], // Południowy Zachód
+  [54.50, 24.15]  // Północny Wschód
+];
+
 // Helper to change map view
 function MapUpdater({ center, zoom }: { center: [number, number], zoom: number }) {
   const map = useMap();
@@ -80,6 +86,7 @@ const App: React.FC = () => {
   const [processingId, setProcessingId] = useState<number | null>(null);
 
   const [configOpen, setConfigOpen] = useState(false);
+  const [showMobileList, setShowMobileList] = useState(false); // NEW: Mobile State
   
   // Config State
   const [pipedriveKey, setPipedriveKey] = useState('6c6adad664dfb383b78eccf3ab7726bebb349c72');
@@ -142,8 +149,17 @@ const App: React.FC = () => {
   };
 
   const loadData = useCallback(async () => {
-    setIsLoading(true);
+    // --- KROK 1: ŁADOWANIE Z CACHE (TURBO MODE) ---
+    const cached = getCachedProjects();
+    if (cached) {
+        setProjects(cached);
+        setIsLoading(false);
+    } else {
+        setIsLoading(true);
+    }
+
     try {
+      // --- KROK 2: POBIERANIE ŚWIEŻYCH DANYCH (BACKGROUND) ---
       const data = await fetchPipedriveProjects(pipedriveKey, useMock);
       setProjects(data);
     } catch (error) {
@@ -160,6 +176,7 @@ const App: React.FC = () => {
   const handleSelectProject = (id: number) => {
     setSelectedProjectId(id);
     setAiAdvice(null);
+    setShowMobileList(false); // Auto-close list on mobile when selecting
   };
 
   const handleMarkerClick = (e: any, item: any) => {
@@ -203,10 +220,11 @@ const App: React.FC = () => {
       : [DEFAULTS.CENTER_LAT, DEFAULTS.CENTER_LNG];
   }, [selectedProject]);
 
-  const mapZoom = selectedProject?.coordinates ? 13 : DEFAULTS.ZOOM;
+  // Zmieniono zoom z 13 na 10, aby był zgodny z maxZoom mapy
+  const mapZoom = selectedProject?.coordinates ? 10 : DEFAULTS.ZOOM;
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-gray-100 font-sans text-gray-900">
+    <div className="relative h-screen w-screen overflow-hidden flex flex-col md:flex-row bg-gray-100 font-sans text-gray-900">
       
       {/* Config Modal */}
       {configOpen && (
@@ -236,31 +254,58 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Sidebar */}
-      <Sidebar 
-        projects={visibleProjects} 
-        isLoading={isLoading} 
-        onSelectProject={handleSelectProject}
-        onDeliver={handleMarkDelivered} 
-        onUpdateAddress={handleManualAddressUpdate}
-        configOpen={configOpen}
-        setConfigOpen={setConfigOpen}
-        selectedProjectId={selectedProjectId}
-        processingId={processingId}
-        isRoutingMode={isRoutingMode}
-        setIsRoutingMode={setIsRoutingMode}
-        route={route}
-        setRoute={setRoute}
-        filters={visibleFilters}
-        onToggleFilter={handleToggleFilter}
-      />
+      {/* Sidebar - Responsive Wrapper */}
+      <div className={`
+        absolute inset-0 z-30 bg-white transition-transform duration-300 ease-in-out transform
+        ${showMobileList ? 'translate-y-0' : 'translate-y-full'}
+        md:relative md:translate-y-0 md:z-0 md:w-auto shadow-xl md:shadow-none
+      `}>
+        <Sidebar 
+            projects={visibleProjects} 
+            isLoading={isLoading} 
+            onSelectProject={handleSelectProject}
+            onDeliver={handleMarkDelivered} 
+            onUpdateAddress={handleManualAddressUpdate}
+            configOpen={configOpen}
+            setConfigOpen={setConfigOpen}
+            selectedProjectId={selectedProjectId}
+            processingId={processingId}
+            isRoutingMode={isRoutingMode}
+            setIsRoutingMode={setIsRoutingMode}
+            route={route}
+            setRoute={setRoute}
+            filters={visibleFilters}
+            onToggleFilter={handleToggleFilter}
+        />
+      </div>
+
+      {/* Mobile Floating Action Button */}
+      <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 z-[1000] md:hidden">
+        <button
+          onClick={() => setShowMobileList(!showMobileList)}
+          className="bg-blue-600 text-white px-6 py-3 rounded-full shadow-xl font-bold flex items-center gap-2 border-2 border-white/20 backdrop-blur-sm active:scale-95 transition-transform"
+        >
+          {showMobileList ? '🗺️ POKAŻ MAPĘ' : `📋 LISTA (${visibleProjects.length})`}
+        </button>
+      </div>
 
       {/* Map Area */}
       <div className="flex-1 relative h-full z-0">
-        <MapContainer center={[DEFAULTS.CENTER_LAT, DEFAULTS.CENTER_LNG]} zoom={DEFAULTS.ZOOM} style={{ height: '100%', width: '100%' }}>
+        <MapContainer 
+          center={[52.06, 19.25]} 
+          zoom={6}
+          minZoom={6}
+          maxZoom={10}
+          maxBounds={polandBounds}
+          maxBoundsViscosity={1.0}
+          scrollWheelZoom={true}
+          style={{ height: '100%', width: '100%' }}
+        >
           <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-            url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+            attribution='Tiles &copy; Esri &mdash; Source: Esri, DeLorme, NAVTEQ, USGS, Intermap, iPC, NRCAN, Esri Japan, METI, Esri China (Hong Kong), Esri (Thailand), TomTom, 2012'
+            url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}"
+            maxNativeZoom={19}
+            maxZoom={22}
           />
           <MapUpdater center={mapCenter} zoom={mapZoom} />
 
@@ -318,7 +363,7 @@ const App: React.FC = () => {
 
         {/* Floating Panel */}
         {selectedProject && !isRoutingMode && (
-          <div className="absolute bottom-4 right-4 w-80 bg-white shadow-2xl rounded-xl p-5 z-[1000] border border-gray-100 animate-in slide-in-from-bottom-4">
+          <div className="absolute bottom-4 right-4 w-80 max-w-[95vw] bg-white shadow-2xl rounded-xl p-5 z-[1000] border border-gray-100 animate-in slide-in-from-bottom-4">
             <div className="flex justify-between mb-3">
               <div className="flex items-start gap-2">
                 {selectedProject.type === 'service' 

@@ -7,6 +7,8 @@ import { geocodeAddress } from './geocoding';
 const ADDRESS_HASH_KEY = '29d06d3e2226db5e54236028b71cc4189a9b0828'; // Twój klucz adresu
 const PROXY_URL = 'https://corsproxy.io/?'; // Proxy do omijania CORS
 const COMPANY_DOMAIN = 'lupus';
+const CACHE_KEY = 'cached_projects';
+const CACHE_TIMESTAMP_KEY = 'last_update';
 
 // MOCK DATA
 const MOCK_PROJECTS: Partial<LogisticsProject>[] = [
@@ -14,6 +16,22 @@ const MOCK_PROJECTS: Partial<LogisticsProject>[] = [
   { id: 102, title: "Siewnik Precyzyjny 4m", clientName: "Adam Nowak", address: "Szamotuły, Dworcowa 10", phaseName: "Transport LUPUS lub inny", phone: "600-200-200", personId: 2, type: 'transport' },
   { id: 103, title: "Naprawa gwarancyjna talerzówki", clientName: "Piotr Zieliński", address: "Mława, Warszawska 1", phaseName: "Zgłoszenie usterki", phone: "700-300-300", personId: 3, type: 'service' },
 ];
+
+/**
+ * Retrieves projects synchronously from LocalStorage for instant UI loading.
+ */
+export const getCachedProjects = (): LogisticsProject[] | null => {
+  try {
+    const cached = localStorage.getItem(CACHE_KEY);
+    if (cached) {
+      console.log("⚡ Załadowano dane z LocalStorage (Offline Cache)");
+      return JSON.parse(cached);
+    }
+  } catch (e) {
+    console.error("Błąd odczytu cache:", e);
+  }
+  return null;
+};
 
 export const fetchPipedriveProjects = async (apiKey: string, useMock: boolean): Promise<LogisticsProject[]> => {
   if (useMock) {
@@ -182,6 +200,15 @@ export const fetchPipedriveProjects = async (apiKey: string, useMock: boolean): 
         type: project._detectedType // Przypisz wykryty typ
       });
     }
+
+    // --- CACHING START ---
+    // Jeśli udało się pobrać dane, zapisz je do cache
+    if (logisticsProjects.length > 0) {
+      console.log(`💾 Zapisywanie ${logisticsProjects.length} projektów do LocalStorage`);
+      localStorage.setItem(CACHE_KEY, JSON.stringify(logisticsProjects));
+      localStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString());
+    }
+    // --- CACHING END ---
 
     return logisticsProjects;
 
