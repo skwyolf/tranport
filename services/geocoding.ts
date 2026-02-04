@@ -1,10 +1,10 @@
 import { GeoLocation } from '../types';
 
-// Simple in-memory cache to avoid hammering the API during a session
 const geoCache: Record<string, GeoLocation | null> = {};
 
 /**
- * Geocodes an address using proxied OpenStreetMap Nominatim API via Netlify.
+ * Geocodes an address using OpenStreetMap Nominatim API.
+ * Zawsze używamy pełnego URL, aby uniknąć błędu 'Invalid URL'.
  */
 export const geocodeAddress = async (address: string): Promise<GeoLocation | null> => {
   if (!address) return null;
@@ -14,7 +14,10 @@ export const geocodeAddress = async (address: string): Promise<GeoLocation | nul
     return geoCache[trimmedAddress];
   }
 
-  const fetchWithProxy = async () => {
+  try {
+    // Safety delay for Nominatim (wymagane przez TOS)
+    await new Promise(resolve => setTimeout(resolve, 1100));
+
     const params = new URLSearchParams({
       q: trimmedAddress,
       format: 'json',
@@ -23,11 +26,7 @@ export const geocodeAddress = async (address: string): Promise<GeoLocation | nul
       addressdetails: '1'
     });
 
-    // Używamy proxy /geo skonfigurowanego w _redirects
-    const isNetlify = typeof window !== 'undefined' && (window.location.hostname.includes('netlify.app') || window.location.hostname !== 'localhost');
-    const url = isNetlify 
-      ? `/geo/search?${params.toString()}`
-      : `https://nominatim.openstreetmap.org/search?${params.toString()}`;
+    const url = `https://nominatim.openstreetmap.org/search?${params.toString()}`;
     
     const response = await fetch(url, {
       headers: {
@@ -36,16 +35,11 @@ export const geocodeAddress = async (address: string): Promise<GeoLocation | nul
     });
     
     if (!response.ok) {
-      throw new Error(`HTTP status ${response.status}`);
+      console.error(`Geocoding HTTP error: ${response.status}`);
+      return null;
     }
-    return await response.json();
-  };
 
-  try {
-    // Nominatim rate limit safety - wait at least 1 second between requests
-    await new Promise(resolve => setTimeout(resolve, 1100));
-
-    const data = await fetchWithProxy();
+    const data = await response.json();
 
     if (data && data.length > 0) {
       const result: GeoLocation = {
@@ -56,7 +50,7 @@ export const geocodeAddress = async (address: string): Promise<GeoLocation | nul
       return result;
     }
   } catch (error) {
-    console.error("Geocoding error for address:", trimmedAddress, error);
+    console.error("Geocoding exception for address:", trimmedAddress, error);
   }
 
   return null;

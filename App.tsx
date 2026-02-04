@@ -107,7 +107,6 @@ const App: React.FC = () => {
     setIsLoading(true);
     try {
       const data = await fetchPipedriveProjects(pipedriveKey, useMock);
-      // Resilience: only update if we got valid data back
       if (data !== null) {
         setProjects(data);
       }
@@ -142,26 +141,24 @@ const App: React.FC = () => {
   };
 
   const loadData = useCallback(async () => {
-    // 1. Najpierw ładowanie z cache (Cache-First)
+    // 1. Cache-First: Najpierw dane z pamięci
     const cached = getCachedProjects();
     if (cached) {
-        setProjects(cached);
+      setProjects(cached);
     }
     
     setIsLoading(true);
 
     try {
-      // 2. Próba pobrania nowych danych
+      // 2. Próba aktualizacji z API
       const newData = await fetchPipedriveProjects(pipedriveKey, useMock);
       
-      // 3. Blokada czyszczenia: aktualizujemy tylko jeśli dane nie są null (błąd połączenia)
+      // 3. Blokada czyszczenia: aktualizujemy tylko przy poprawnym newData
       if (newData !== null) {
         setProjects(newData);
-      } else {
-        console.warn("API zwróciło błąd, zachowano dane z cache.");
       }
     } catch (error) {
-      console.error("Data fetch failed, keeping existing/cached data.", error);
+      console.error("Data fetch failed, keeping existing data.", error);
     } finally {
       setIsLoading(false);
     }

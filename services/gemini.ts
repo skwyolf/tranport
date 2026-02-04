@@ -9,7 +9,7 @@ export const analyzeDelivery = async (project: LogisticsProject): Promise<string
   if (!apiKey) return "Błąd konfiguracji: Brak klucza API Gemini (process.env.API_KEY).";
 
   try {
-    const ai = new GoogleGenAI({ apiKey });
+    const ai = new GoogleGenAI({ apiKey: apiKey });
     
     const prompt = `
       Jesteś asystentem logistycznym dla firmy rolniczej.
@@ -24,11 +24,13 @@ export const analyzeDelivery = async (project: LogisticsProject): Promise<string
       Mów po polsku.
     `;
 
+    // Fix: Updated model to 'gemini-3-flash-preview' for basic text tasks
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3-flash-preview',
       contents: prompt,
     });
 
+    // Fix: Directly accessing the .text property as per guidelines
     return response.text || "Nie udało się wygenerować porady.";
   } catch (error) {
     console.error("Gemini Error:", error);

@@ -8,10 +8,22 @@ const COMPANY_DOMAIN = 'lupus';
 const CACHE_KEY = 'cached_projects';
 const CACHE_TIMESTAMP_KEY = 'last_update';
 
-// Inteligentny BASE_URL wybierający proxy Netlify lub bezpośrednie połączenie
-const BASE_URL = typeof window !== 'undefined' && (window.location.hostname.includes('netlify.app') || window.location.hostname !== 'localhost')
-  ? '/api/v1' 
-  : 'https://api.pipedrive.com/v1';
+/**
+ * Konstruujemy BASE_URL tak, aby zawsze był poprawnym URL-em.
+ * Na Netlify używamy ścieżki relatywnej zaczynającej się od /api, 
+ * ale dla axiosa/fetcha w przeglądarce musi to być rozpoznawalne.
+ */
+const getBaseUrl = () => {
+  if (typeof window === 'undefined') return 'https://api.pipedrive.com/v1';
+  
+  const isProduction = window.location.hostname.includes('netlify.app') || window.location.hostname !== 'localhost';
+  
+  // Jeśli jesteśmy na produkcji, używamy proxy /api (skonfigurowanego w _redirects)
+  // Jeśli lokalnie, łączymy się bezpośrednio
+  return isProduction ? `${window.location.origin}/api/v1` : 'https://api.pipedrive.com/v1';
+};
+
+const BASE_URL = getBaseUrl();
 
 // MOCK DATA
 const MOCK_PROJECTS: Partial<LogisticsProject>[] = [
@@ -44,6 +56,27 @@ export const removeProjectFromCache = (projectId: number) => {
   }
 };
 
+/**
+ * Funkcja pomocnicza do bezpiecznych zapytań z logowaniem (zgodnie z prośbą użytkownika)
+ */
+async function pipedriveGet(endpoint: string, apiKey: string) {
+  const url = `${BASE_URL}${endpoint}${endpoint.includes('?') ? '&' : '?'}api_token=${apiKey}`;
+  console.log('Final URL:', url);
+  
+  try {
+    const response = await axios.get(url);
+    return response.data;
+  } catch (error: any) {
+    if (error.response) {
+      console.error('Status błędu:', error.response.status);
+      console.error('Treść błędu z serwera:', error.response.data);
+    } else {
+      console.error('Błąd połączenia (brak odpowiedzi):', error.message);
+    }
+    throw error;
+  }
+}
+
 export const fetchPipedriveProjects = async (apiKey: string, useMock: boolean): Promise<LogisticsProject[] | null> => {
   if (useMock) {
     const projects: LogisticsProject[] = [];
@@ -68,18 +101,20 @@ export const fetchPipedriveProjects = async (apiKey: string, useMock: boolean): 
   }
 
   try {
-    const boardsRes = await axios.get(`${BASE_URL}/projects/boards?api_token=${apiKey}`);
-    const allBoards = boardsRes.data.data || [];
+    // Pobieranie tablic (boards)
+    const boardsData = await pipedriveGet('/projects/boards', apiKey);
+    const allBoards = boardsData.data || [];
     
     const transportBoard = allBoards.find((b: any) => /dostarczenie|delivery|transport/i.test(b.name));
     const serviceBoard = allBoards.find((b: any) => /serwis|service|naprawy|warsztat/i.test(b.name));
 
     const fetchPhases = async (boardId: number | undefined) => {
       if (!boardId) return [];
-      const res = await axios.get(`${BASE_URL}/projects/phases?board_id=${boardId}&api_token=${apiKey}`);
-      return res.data.data || [];
+      const phasesData = await pipedriveGet(`/projects/phases?board_id=${boardId}`, apiKey);
+      return phasesData.data || [];
     };
 
+    // Fix: Corrected block-scoped variable error by using serviceBoard?.id instead of servicePhasesAll?.id
     const [transportPhasesAll, servicePhasesAll] = await Promise.all([
       fetchPhases(transportBoard?.id),
       fetchPhases(serviceBoard?.id)
@@ -93,7 +128,7 @@ export const fetchPipedriveProjects = async (apiKey: string, useMock: boolean): 
       .map((p: any) => p.id);
 
     const serviceKeywords = ['usterki', 'diagnoza', 'rozwiązanie', 'termin', 'napraw', 'zgłoszenie'];
-    const servicePhaseIds = servicePhasesAll
+    const servicePhaseIds = (servicePhasesAll || [])
       .filter((p: any) => {
         const n = p.name.toLowerCase();
         return serviceKeywords.some(k => n.includes(k));
@@ -101,10 +136,11 @@ export const fetchPipedriveProjects = async (apiKey: string, useMock: boolean): 
       .map((p: any) => p.id);
 
     const phaseNameMap: Record<number, string> = {};
-    [...transportPhasesAll, ...servicePhasesAll].forEach((p: any) => phaseNameMap[p.id] = p.name);
+    [...transportPhasesAll, ...(servicePhasesAll || [])].forEach((p: any) => phaseNameMap[p.id] = p.name);
 
-    const projectsRes = await axios.get(`${BASE_URL}/projects?status=open&limit=500&api_token=${apiKey}`);
-    const allProjects = projectsRes.data.data || [];
+    // Pobieranie projektów
+    const projectsData = await pipedriveGet('/projects?status=open&limit=500', apiKey);
+    const allProjects = projectsData.data || [];
 
     const validProjectsRaw = allProjects.filter((p: any) => {
       if (transportPhaseIds.includes(p.phase_id)) {
@@ -127,8 +163,8 @@ export const fetchPipedriveProjects = async (apiKey: string, useMock: boolean): 
 
       if (personId) {
         try {
-          const personRes = await axios.get(`${BASE_URL}/persons/${personId}?api_token=${apiKey}`);
-          const personData = personRes.data.data;
+          const personDataRaw = await pipedriveGet(`/persons/${personId}`, apiKey);
+          const personData = personDataRaw.data;
           clientName = personData.name;
           address = personData[ADDRESS_HASH_KEY];
           if (!address && personData.org_id?.address) address = personData.org_id.address;
@@ -164,14 +200,15 @@ export const fetchPipedriveProjects = async (apiKey: string, useMock: boolean): 
     return logisticsProjects;
   } catch (error) {
     console.error('CRITICAL ERROR fetchPipedriveProjects:', error);
-    return null; // Zwracamy null zamiast pustej tablicy, aby App wiedziała, że to błąd sieci
+    return null; // Zwracamy null, aby zachować dane z cache w App.tsx
   }
 };
 
 export const updatePersonAddress = async (personId: number, newAddress: string, apiKey: string, useMock: boolean): Promise<boolean> => {
   if (useMock) return true;
   try {
-    await axios.put(`${BASE_URL}/persons/${personId}?api_token=${apiKey}`, {
+    const url = `${BASE_URL}/persons/${personId}?api_token=${apiKey}`;
+    await axios.put(url, {
       [ADDRESS_HASH_KEY]: newAddress
     });
     return true;
@@ -190,8 +227,8 @@ export const advanceProjectStage = async (
   if (useMock) return true;
   
   try {
-    const boardsRes = await axios.get(`${BASE_URL}/projects/boards?api_token=${apiKey}`);
-    const allBoards = boardsRes.data.data || [];
+    const boardsData = await pipedriveGet('/projects/boards', apiKey);
+    const allBoards = boardsData.data || [];
 
     let boardPattern: RegExp;
     let phasePattern: RegExp;
@@ -207,18 +244,16 @@ export const advanceProjectStage = async (
     const targetBoard = allBoards.find((b: any) => boardPattern.test(b.name));
     if (!targetBoard) return false;
 
-    const phasesRes = await axios.get(`${BASE_URL}/projects/phases?board_id=${targetBoard.id}&api_token=${apiKey}`);
-    const targetPhase = phasesRes.data.data.find((p: any) => phasePattern.test(p.name));
+    const phasesData = await pipedriveGet(`/projects/phases?board_id=${targetBoard.id}`, apiKey);
+    const targetPhase = phasesData.data.find((p: any) => phasePattern.test(p.name));
 
     if (!targetPhase) return false;
 
-    await axios.put(
-      `${BASE_URL}/projects/${projectId}?api_token=${apiKey}`, 
-      { phase_id: targetPhase.id }
-    );
+    const url = `${BASE_URL}/projects/${projectId}?api_token=${apiKey}`;
+    await axios.put(url, { phase_id: targetPhase.id });
     return true;
   } catch (error: any) {
-    console.error("Błąd API Pipedrive:", error);
+    console.error("Błąd API Pipedrive (advance):", error);
     return false;
   }
 };
