@@ -9,21 +9,14 @@ const CACHE_KEY = 'cached_projects';
 const CACHE_TIMESTAMP_KEY = 'last_update';
 
 /**
- * Konstruujemy BASE_URL tak, aby zawsze był poprawnym URL-em.
- * Na Netlify używamy ścieżki relatywnej zaczynającej się od /api, 
- * ale dla axiosa/fetcha w przeglądarce musi to być rozpoznawalne.
+ * Ustawiamy bezpośredni URL Pipedrive. 
+ * Jeśli /api/v1 zwracało 404, oznacza to, że serwer na którym hostowana jest aplikacja 
+ * nie posiada skonfigurowanego mechanizmu proxy (rewrite rules).
+ * 
+ * UWAGA: Jeśli wystąpi błąd CORS, należy użyć rozszerzenia do przeglądarki "Allow CORS" 
+ * lub skonfigurować proxy na serwerze (np. _redirects na Netlify).
  */
-const getBaseUrl = () => {
-  if (typeof window === 'undefined') return 'https://api.pipedrive.com/v1';
-  
-  const isProduction = window.location.hostname.includes('netlify.app') || window.location.hostname !== 'localhost';
-  
-  // Jeśli jesteśmy na produkcji, używamy proxy /api (skonfigurowanego w _redirects)
-  // Jeśli lokalnie, łączymy się bezpośrednio
-  return isProduction ? `${window.location.origin}/api/v1` : 'https://api.pipedrive.com/v1';
-};
-
-const BASE_URL = getBaseUrl();
+const BASE_URL = 'https://api.pipedrive.com/v1';
 
 // MOCK DATA
 const MOCK_PROJECTS: Partial<LogisticsProject>[] = [
@@ -57,22 +50,46 @@ export const removeProjectFromCache = (projectId: number) => {
 };
 
 /**
- * Funkcja pomocnicza do bezpiecznych zapytań z logowaniem (zgodnie z prośbą użytkownika)
+ * Rozbudowana funkcja diagnostyczna do zapytań API
  */
 async function pipedriveGet(endpoint: string, apiKey: string) {
-  const url = `${BASE_URL}${endpoint}${endpoint.includes('?') ? '&' : '?'}api_token=${apiKey}`;
+  // Budujemy pełny URL ręcznie, aby uniknąć błędów konstruktora URL przy ścieżkach relatywnych
+  const separator = endpoint.includes('?') ? '&' : '?';
+  const url = `${BASE_URL}${endpoint}${separator}api_token=${apiKey}`;
+  
+  console.log('--- API REQUEST ---');
   console.log('Final URL:', url);
   
   try {
-    const response = await axios.get(url);
+    const response = await axios.get(url, {
+      timeout: 10000,
+      headers: {
+        'Accept': 'application/json'
+      }
+    });
+    console.log(`Response Success [${response.status}] for ${endpoint}`);
     return response.data;
   } catch (error: any) {
+    console.group('--- API ERROR DIAGNOSTICS ---');
+    console.error('Endpoint:', endpoint);
+    console.error('Final URL:', url);
+    
     if (error.response) {
+      // Serwer odpowiedział kodem błędu (np. 404, 401)
       console.error('Status błędu:', error.response.status);
       console.error('Treść błędu z serwera:', error.response.data);
+      if (typeof error.response.data === 'string' && error.response.data.includes('<!DOCTYPE html>')) {
+        console.warn('Serwer zwrócił HTML zamiast JSON. To zazwyczaj oznacza 404 na poziomie serwera WWW (brak ścieżki) lub błędne przekierowanie.');
+      }
+    } else if (error.request) {
+      // Żądanie zostało wysłane, ale nie otrzymano odpowiedzi (np. CORS, Network Error)
+      console.error('Brak odpowiedzi z serwera (możliwy błąd CORS lub brak połączenia).');
+      console.error('Szczegóły requestu:', error.request);
     } else {
-      console.error('Błąd połączenia (brak odpowiedzi):', error.message);
+      // Inny błąd (np. błąd składni)
+      console.error('Błąd konfiguracji żądania:', error.message);
     }
+    console.groupEnd();
     throw error;
   }
 }
@@ -101,7 +118,7 @@ export const fetchPipedriveProjects = async (apiKey: string, useMock: boolean): 
   }
 
   try {
-    // Pobieranie tablic (boards)
+    // 1. Pobieranie tablic (boards)
     const boardsData = await pipedriveGet('/projects/boards', apiKey);
     const allBoards = boardsData.data || [];
     
@@ -114,7 +131,8 @@ export const fetchPipedriveProjects = async (apiKey: string, useMock: boolean): 
       return phasesData.data || [];
     };
 
-    // Fix: Corrected block-scoped variable error by using serviceBoard?.id instead of servicePhasesAll?.id
+    // 2. Pobieranie faz
+    // Naprawiono błąd referencji (było servicePhasesAll?.id przed deklaracją)
     const [transportPhasesAll, servicePhasesAll] = await Promise.all([
       fetchPhases(transportBoard?.id),
       fetchPhases(serviceBoard?.id)
@@ -138,7 +156,7 @@ export const fetchPipedriveProjects = async (apiKey: string, useMock: boolean): 
     const phaseNameMap: Record<number, string> = {};
     [...transportPhasesAll, ...(servicePhasesAll || [])].forEach((p: any) => phaseNameMap[p.id] = p.name);
 
-    // Pobieranie projektów
+    // 3. Pobieranie projektów
     const projectsData = await pipedriveGet('/projects?status=open&limit=500', apiKey);
     const allProjects = projectsData.data || [];
 
