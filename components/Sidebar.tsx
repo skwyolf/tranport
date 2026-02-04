@@ -1,7 +1,6 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { LogisticsProject } from '../types';
-import { Search, AlertTriangle, CheckCircle, MapPin, Truck, Settings, Phone, User, Layers, Check, Loader2, Map, X, ExternalLink, Copy, Star, Pencil, Save, Filter, RefreshCw } from 'lucide-react';
+import { Search, AlertTriangle, CheckCircle, MapPin, Truck, Settings, Phone, User, Layers, Check, Loader2, Map, X, ExternalLink, Copy, Star, Pencil, Save, RefreshCw } from 'lucide-react';
 
 interface SidebarProps {
   projects: LogisticsProject[];
@@ -110,14 +109,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
      setEditingProjectId(null);
   };
 
-  // Oblicz całkowity dystans trasy (lotem ptaka)
   const totalDistance = route.reduce((acc, curr, idx) => {
     if (idx === 0) return 0;
     const prev = route[idx - 1];
     return acc + calculateDistance(prev.coordinates.lat, prev.coordinates.lng, curr.coordinates.lat, curr.coordinates.lng);
   }, 0).toFixed(1);
 
-  // --- GOOGLE MAPS LOGIC ---
   const generateMapsLink = () => {
     if (route.length < 2) return '';
     const coordsPath = route
@@ -198,12 +195,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                     const isBase = pt.id === 9999;
                                     return (
                                         <div key={`${pt.id}-${idx}`} className="flex relative pb-4 last:pb-0">
-                                            {/* Timeline Line */}
                                             {!isLast && (
                                                 <div className="absolute left-[15px] top-6 bottom-0 w-0.5 border-l-2 border-dashed border-gray-300 z-0"></div>
                                             )}
                                             
-                                            {/* Badge */}
                                             <div className="z-10 flex-shrink-0 w-8 h-8 mr-3 flex items-center justify-center rounded-full shadow-sm border-2 border-white ring-1 ring-gray-200 bg-gray-100">
                                                 {isBase ? (
                                                     <Star className="w-4 h-4 text-red-500 fill-current" />
@@ -212,7 +207,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                                 )}
                                             </div>
 
-                                            {/* Content */}
                                             <div className="flex-1 flex justify-between items-start pt-1 min-w-0">
                                                 <div className="mr-2">
                                                     <p className="text-sm font-bold text-gray-800 truncate">{pt.title}</p>
@@ -237,7 +231,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             </div>
                         </div>
                         
-                        {/* Action Buttons */}
                         <div className="grid grid-cols-1 gap-2">
                             <button 
                                 onClick={handleOpenGoogleMaps}
@@ -327,7 +320,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </div>
       )}
 
-      {/* List - MODERN CARDS */}
+      {/* List */}
       <div className={`flex-1 overflow-y-auto bg-gray-50/50 px-4 py-4 ${isRoutingMode ? 'opacity-40 pointer-events-none grayscale filter blur-[1px]' : ''}`}>
         {isLoading ? (
           <div className="flex flex-col items-center justify-center h-40 text-gray-400">
@@ -337,7 +330,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
         ) : filteredProjects.length === 0 ? (
           <div className="text-center text-gray-400 py-10">
             <p className="text-sm">Brak wyników.</p>
-            {!filters.transport && !filters.service && <p className="text-xs mt-1">Włącz filtry powyżej.</p>}
           </div>
         ) : (
           <div className="pb-20 space-y-3">
@@ -361,11 +353,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     }
                   `}
                 >
-                  {/* Selection Indicator */}
                   {isSelected && <div className="absolute left-0 top-0 bottom-0 w-1 bg-blue-500"></div>}
                   {project.status === 'geocoding_error' && <div className="absolute left-0 top-0 bottom-0 w-1 bg-red-500"></div>}
 
-                  {/* Header Projektu */}
                   <div className="flex justify-between items-start mb-3">
                     <h3 className="font-bold text-sm text-gray-900 leading-tight">
                       {project.title}
@@ -375,9 +365,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     )}
                   </div>
                   
-                  {/* Dane Klienta */}
                   <div className="flex flex-col gap-1.5 mb-4">
-                      {/* Wiersz Klient + Link CRM */}
                       <div className="flex items-center justify-between">
                         <div className="text-sm text-gray-600 flex items-center gap-2">
                           <div className="bg-gray-100 p-1 rounded-md"><User className="w-3 h-3 text-gray-500" /></div>
@@ -389,20 +377,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             rel="noreferrer"
                             onClick={(e) => e.stopPropagation()}
                             className="flex items-center gap-1 text-[10px] font-bold text-slate-500 hover:text-blue-600 bg-slate-100 hover:bg-blue-50 px-2 py-0.5 rounded transition-colors"
-                            title="Otwórz w Pipedrive"
                         >
                             CRM <ExternalLink className="w-3 h-3" />
                         </a>
                       </div>
 
+                      {/* SEKCJA TELEFONU - CLICK TO CALL */}
                       {project.phone && (
-                        <div className="text-xs text-blue-600 flex items-center gap-2">
-                          <div className="bg-blue-50 p-1 rounded-md"><Phone className="w-3 h-3" /></div>
-                          <span className="font-medium">{project.phone}</span>
-                        </div>
+                        <a
+                          href={`tel:${project.phone}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="flex items-center gap-2 mt-2 mb-2 px-3 py-2 bg-green-50 border border-green-200 rounded-lg text-green-700 hover:bg-green-100 transition-colors cursor-pointer no-underline"
+                          title="Zadzwoń teraz"
+                        >
+                          <span className="text-lg">📞</span>
+                          <span className="font-bold tracking-wide text-xs">{project.phone}</span>
+                        </a>
                       )}
 
-                      {/* ADDRESS SECTION - EDITABLE */}
                       <div className="text-xs text-gray-500 flex items-start gap-2 mt-0.5">
                           <div className="bg-gray-100 p-1 rounded-md mt-0.5 flex-shrink-0">
                               <MapPin className={`w-3 h-3 ${project.status === 'geocoding_error' ? 'text-red-500' : 'text-gray-500'}`} />
@@ -444,12 +436,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                   <div className="flex items-start justify-between group/addr">
                                       <span className={`leading-relaxed ${project.status === 'geocoding_error' ? 'text-red-600 font-medium' : ''}`}>
                                           {project.address}
-                                          {project.status === 'geocoding_error' && <span className="block text-[10px] text-red-400 italic">Błąd lokalizacji. Kliknij ołówek, aby poprawić.</span>}
                                       </span>
                                       <button 
                                           onClick={(e) => { e.stopPropagation(); startEditing(project); }}
                                           className="text-gray-400 hover:text-blue-600 p-1 rounded-full hover:bg-blue-50 transition opacity-0 group-hover/addr:opacity-100 focus:opacity-100"
-                                          title="Edytuj adres"
                                       >
                                           <Pencil className="w-3 h-3" />
                                       </button>
@@ -459,7 +449,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       </div>
                   </div>
 
-                  {/* Footer Actions */}
                   <div className="flex items-center justify-between pt-3 border-t border-gray-50 mt-2">
                     <span className="text-[10px] uppercase tracking-wider font-bold text-gray-400 flex items-center gap-1">
                       <Layers className="w-3 h-3" />

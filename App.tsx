@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline } from 'react-leaflet';
 import L from 'leaflet';
@@ -6,8 +5,6 @@ import { Sidebar } from './components/Sidebar';
 import { fetchPipedriveProjects, advanceProjectStage, updatePersonAddress, getCachedProjects, removeProjectFromCache } from './services/pipedrive';
 import { geocodeAddress } from './services/geocoding';
 import { LogisticsProject, DEFAULTS } from './types';
-import { Phone, User, Layers, Bot, Wrench, Truck } from 'lucide-react';
-import { analyzeDelivery } from './services/gemini';
 
 // Fix Leaflet default icon issue in React (browser ESM)
 const iconUrl = 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png';
@@ -80,15 +77,11 @@ const App: React.FC = () => {
   const [processingId, setProcessingId] = useState<number | null>(null);
 
   const [configOpen, setConfigOpen] = useState(false);
-  const [showMobileList, setShowMobileList] = useState(false); // NEW: Mobile State
+  const [showMobileList, setShowMobileList] = useState(false); 
   
   // Config State
   const [pipedriveKey, setPipedriveKey] = useState('6c6adad664dfb383b78eccf3ab7726bebb349c72');
   const [useMock, setUseMock] = useState(false);
-
-  // AI State
-  const [aiAdvice, setAiAdvice] = useState<string | null>(null);
-  const [loadingAi, setLoadingAi] = useState(false);
 
   // Routing State
   const [isRoutingMode, setIsRoutingMode] = useState(false);
@@ -102,7 +95,6 @@ const App: React.FC = () => {
     return projects.filter(p => visibleFilters[p.type]);
   }, [projects, visibleFilters]);
 
-  // Helper do pobrania obiektu na podstawie ID
   const selectedProject = useMemo(() => 
     visibleProjects.find(p => p.id === selectedProjectId) || null
   , [visibleProjects, selectedProjectId]);
@@ -111,14 +103,14 @@ const App: React.FC = () => {
     setVisibleFilters(prev => ({ ...prev, [type]: !prev[type] }));
   };
 
-  // --- FORCE REFRESH LOGIC ---
   const handleForceRefresh = async () => {
-    console.log("🔄 Force Refresh triggered by user.");
     setIsLoading(true);
     try {
       const data = await fetchPipedriveProjects(pipedriveKey, useMock);
-      setProjects(data);
-      console.log('✅ Dane odświeżone z Pipedrive');
+      // Resilience: only update if we got valid data back
+      if (data !== null) {
+        setProjects(data);
+      }
     } catch (err) {
       console.error('Błąd podczas odświeżania:', err);
     } finally {
@@ -127,31 +119,20 @@ const App: React.FC = () => {
   };
 
   const handleMarkDelivered = async (id: number) => {
-    console.log("🚀 App: Rozpoczynam procedurę dla ID:", id);
-    
     const project = projects.find(p => p.id === id);
     if (!project) return;
 
     setProcessingId(id);
 
     try {
-      // Wywołanie nowej funkcji ze "Zwrotnicą" (Typ Transport vs Serwis)
       const success = await advanceProjectStage(id, project.type, pipedriveKey, useMock);
-      
       if (success) {
-        console.log("✅ App: Sukces operacji. Usuwam projekt z widoku.");
         setProjects(prev => prev.filter(p => p.id !== id));
         setRoute(prev => prev.filter(r => r.id !== id));
-        
-        // NAPRAWA "GHOST EFFECT": Usuń z cache od razu po sukcesie
         removeProjectFromCache(id);
-
         if (selectedProjectId === id) {
           setSelectedProjectId(null);
-          setAiAdvice(null);
         }
-      } else {
-        console.error("❌ App: Operacja zakończona niepowodzeniem.");
       }
     } catch (err) {
       console.error("💥 App: Krytyczny błąd w handleMarkDelivered:", err);
@@ -161,21 +142,26 @@ const App: React.FC = () => {
   };
 
   const loadData = useCallback(async () => {
-    // --- KROK 1: ŁADOWANIE Z CACHE (TURBO MODE) ---
+    // 1. Najpierw ładowanie z cache (Cache-First)
     const cached = getCachedProjects();
     if (cached) {
         setProjects(cached);
-        setIsLoading(false);
-    } else {
-        setIsLoading(true);
     }
+    
+    setIsLoading(true);
 
     try {
-      // --- KROK 2: POBIERANIE ŚWIEŻYCH DANYCH (BACKGROUND) ---
-      const data = await fetchPipedriveProjects(pipedriveKey, useMock);
-      setProjects(data);
+      // 2. Próba pobrania nowych danych
+      const newData = await fetchPipedriveProjects(pipedriveKey, useMock);
+      
+      // 3. Blokada czyszczenia: aktualizujemy tylko jeśli dane nie są null (błąd połączenia)
+      if (newData !== null) {
+        setProjects(newData);
+      } else {
+        console.warn("API zwróciło błąd, zachowano dane z cache.");
+      }
     } catch (error) {
-      console.error(error);
+      console.error("Data fetch failed, keeping existing/cached data.", error);
     } finally {
       setIsLoading(false);
     }
@@ -187,27 +173,17 @@ const App: React.FC = () => {
 
   const handleSelectProject = (id: number) => {
     setSelectedProjectId(id);
-    setAiAdvice(null);
-    setShowMobileList(false); // Auto-close list on mobile when selecting
+    setShowMobileList(false);
   };
 
   const handleMarkerClick = (e: any, item: any) => {
     if (isRoutingMode) {
-      console.log("Dodano do trasy:", item.title);
       setRoute(prev => [...prev, item]);
     } else {
       if (item.id === LUPUS_BASE.id) return;
       e.originalEvent.stopPropagation();
-      console.log("Map Marker Click: ", item.id);
       handleSelectProject(item.id);
     }
-  };
-
-  const handleAskAI = async (project: LogisticsProject) => {
-    setLoadingAi(true);
-    const advice = await analyzeDelivery(project);
-    setAiAdvice(advice);
-    setLoadingAi(false);
   };
 
   const handleManualAddressUpdate = async (projectId: number, newAddress: string) => {
@@ -232,13 +208,11 @@ const App: React.FC = () => {
       : [DEFAULTS.CENTER_LAT, DEFAULTS.CENTER_LNG];
   }, [selectedProject]);
 
-  // Zmieniono zoom z 13 na 10, aby był zgodny z maxZoom mapy
   const mapZoom = selectedProject?.coordinates ? 10 : DEFAULTS.ZOOM;
 
   return (
     <div className="relative h-screen w-screen overflow-hidden flex flex-col md:flex-row bg-gray-100 font-sans text-gray-900">
       
-      {/* Config Modal */}
       {configOpen && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center backdrop-blur-sm">
           <div className="bg-white rounded-xl shadow-2xl p-6 w-96 max-w-full">
@@ -266,7 +240,6 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Sidebar - Responsive Wrapper */}
       <div className={`
         absolute inset-0 z-30 bg-white transition-transform duration-300 ease-in-out transform
         ${showMobileList ? 'translate-y-0' : 'translate-y-full'}
@@ -292,7 +265,6 @@ const App: React.FC = () => {
         />
       </div>
 
-      {/* Mobile Floating Action Button */}
       <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 z-[1000] md:hidden">
         <button
           onClick={() => setShowMobileList(!showMobileList)}
@@ -302,7 +274,6 @@ const App: React.FC = () => {
         </button>
       </div>
 
-      {/* Map Area */}
       <div className="flex-1 relative h-full z-0">
         <MapContainer 
           center={[52.06, 19.25]} 
@@ -319,7 +290,6 @@ const App: React.FC = () => {
           />
           <MapUpdater center={mapCenter} zoom={mapZoom} />
 
-          {/* 1. BAZA LUPUS MARKER */}
           <Marker 
             position={[LUPUS_BASE.coordinates.lat, LUPUS_BASE.coordinates.lng]}
             icon={BaseIcon}
@@ -333,7 +303,6 @@ const App: React.FC = () => {
             </Popup>
           </Marker>
 
-          {/* 2. PROJEKTY MARKERS (Używamy visibleProjects) */}
           {visibleProjects.map((project) => (
             project.coordinates && (
               <Marker 
@@ -345,15 +314,39 @@ const App: React.FC = () => {
                 }}
               >
                 <Popup>
-                  <div className="text-center p-1">
+                  <div className="p-2 min-w-[220px]">
                     <div className={`text-[10px] font-bold uppercase mb-1 ${project.type === 'service' ? 'text-amber-600' : 'text-blue-600'}`}>
                         {project.type === 'service' ? '🔧 SERWIS' : '🚚 TRANSPORT'}
                     </div>
-                    <strong className="block text-sm text-gray-800 leading-tight">{project.title}</strong>
-                    <span className="text-xs text-gray-500">{project.clientName}</span>
-                    
+                    <h3 className="font-bold text-gray-900 leading-tight mb-1">{project.title}</h3>
+                    <div className="text-sm text-gray-600 mb-2">
+                       <div className="font-semibold flex items-center gap-1">👤 {project.clientName}</div>
+                       {project.phone && (
+                         <a 
+                            href={`tel:${project.phone}`} 
+                            onClick={(e) => e.stopPropagation()}
+                            className="inline-flex items-center gap-1 mt-1 text-blue-600 font-bold hover:underline"
+                          >
+                           📞 {project.phone}
+                         </a>
+                       )}
+                    </div>
+
+                    {!isRoutingMode && (
+                      <button
+                        onClick={(e) => {
+                           e.stopPropagation();
+                           const coords = `${project.coordinates?.lat},${project.coordinates?.lng}`;
+                           window.open(`https://www.google.com/maps/dir/?api=1&destination=${coords}`, '_blank');
+                        }}
+                        className="w-full bg-blue-600 text-white py-2 rounded font-bold hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 text-xs"
+                      >
+                        🗺️ NAWIGUJ (GOOGLE)
+                      </button>
+                    )}
+
                     {isRoutingMode && (
-                      <p className="text-[10px] text-green-600 mt-1 font-bold">Kliknij by dodać do trasy</p>
+                      <p className="text-[10px] text-green-600 mt-1 font-bold text-center italic">Kliknij by dodać do trasy</p>
                     )}
                   </div>
                 </Popup>
@@ -361,7 +354,6 @@ const App: React.FC = () => {
             )
           ))}
 
-          {/* 3. LINIA TRASY */}
           {route.length > 1 && (
             <Polyline 
               positions={route.map(r => [r.coordinates.lat, r.coordinates.lng])} 
@@ -370,43 +362,6 @@ const App: React.FC = () => {
           )}
 
         </MapContainer>
-
-        {/* Floating Panel */}
-        {selectedProject && !isRoutingMode && (
-          <div className="absolute bottom-4 right-4 w-80 max-w-[95vw] bg-white shadow-2xl rounded-xl p-5 z-[1000] border border-gray-100 animate-in slide-in-from-bottom-4">
-            <div className="flex justify-between mb-3">
-              <div className="flex items-start gap-2">
-                {selectedProject.type === 'service' 
-                    ? <Wrench className="w-5 h-5 text-amber-500 mt-0.5" /> 
-                    : <Truck className="w-5 h-5 text-blue-600 mt-0.5" />
-                }
-                <h3 className="font-bold text-gray-800 text-lg leading-tight">{selectedProject.title}</h3>
-              </div>
-              <button onClick={() => setSelectedProjectId(null)} className="text-gray-400 hover:text-gray-600">×</button>
-            </div>
-            <div className="mt-2 text-sm text-gray-600 space-y-2">
-              <p className="flex items-center gap-2"><User className="w-4 h-4 text-gray-400"/> {selectedProject.clientName}</p>
-              <p className="flex items-center gap-2"><Phone className="w-4 h-4 text-gray-400"/> {selectedProject.phone}</p>
-              <p className="flex items-center gap-2"><Layers className="w-4 h-4 text-gray-400"/> {selectedProject.phaseName}</p>
-            </div>
-            
-            <div className="mt-4 bg-indigo-50 p-3 rounded-lg border border-indigo-100">
-              <div className="flex items-center gap-2 mb-2">
-                <Bot className="w-4 h-4 text-indigo-600" />
-                <span className="text-xs font-bold text-indigo-800 uppercase tracking-wide">Asystent AI</span>
-              </div>
-              {!aiAdvice && !loadingAi && (
-                <button onClick={() => handleAskAI(selectedProject)} className="w-full text-xs bg-indigo-600 text-white py-2 rounded-md hover:bg-indigo-700 transition font-medium">Generuj wskazówki dla kierowcy</button>
-              )}
-              {loadingAi && <div className="text-xs animate-pulse text-indigo-600 font-medium">Analizuję trasę...</div>}
-              {aiAdvice && <div className="text-xs text-gray-700 italic leading-relaxed">{aiAdvice}</div>}
-            </div>
-            
-            <a href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(selectedProject.address)}`} target="_blank" rel="noreferrer" className="block mt-4 text-center text-xs bg-white border border-blue-600 text-blue-600 hover:bg-blue-50 py-2 rounded-md font-bold transition">
-              Otwórz w Google Maps
-            </a>
-          </div>
-        )}
       </div>
     </div>
   );

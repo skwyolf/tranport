@@ -1,14 +1,17 @@
-
 import axios from 'axios';
 import { LogisticsProject } from '../types';
 import { geocodeAddress } from './geocoding';
 
 // ZMIENNE KONFIGURACYJNE
-const ADDRESS_HASH_KEY = '29d06d3e2226db5e54236028b71cc4189a9b0828'; // Twój klucz adresu
-const PROXY_URL = 'https://corsproxy.io/?'; // Proxy do omijania CORS
+const ADDRESS_HASH_KEY = '29d06d3e2226db5e54236028b71cc4189a9b0828';
 const COMPANY_DOMAIN = 'lupus';
 const CACHE_KEY = 'cached_projects';
 const CACHE_TIMESTAMP_KEY = 'last_update';
+
+// Inteligentny BASE_URL wybierający proxy Netlify lub bezpośrednie połączenie
+const BASE_URL = typeof window !== 'undefined' && (window.location.hostname.includes('netlify.app') || window.location.hostname !== 'localhost')
+  ? '/api/v1' 
+  : 'https://api.pipedrive.com/v1';
 
 // MOCK DATA
 const MOCK_PROJECTS: Partial<LogisticsProject>[] = [
@@ -17,14 +20,10 @@ const MOCK_PROJECTS: Partial<LogisticsProject>[] = [
   { id: 103, title: "Naprawa gwarancyjna talerzówki", clientName: "Piotr Zieliński", address: "Mława, Warszawska 1", phaseName: "Zgłoszenie usterki", phone: "700-300-300", personId: 3, type: 'service' },
 ];
 
-/**
- * Retrieves projects synchronously from LocalStorage for instant UI loading.
- */
 export const getCachedProjects = (): LogisticsProject[] | null => {
   try {
     const cached = localStorage.getItem(CACHE_KEY);
     if (cached) {
-      console.log("⚡ Załadowano dane z LocalStorage (Offline Cache)");
       return JSON.parse(cached);
     }
   } catch (e) {
@@ -33,27 +32,20 @@ export const getCachedProjects = (): LogisticsProject[] | null => {
   return null;
 };
 
-/**
- * Removes a specific project from LocalStorage to prevent "Ghost Effect"
- * where completed projects reappear on reload.
- */
 export const removeProjectFromCache = (projectId: number) => {
   try {
     const cached = getCachedProjects();
     if (cached) {
       const updated = cached.filter(p => p.id !== projectId);
       localStorage.setItem(CACHE_KEY, JSON.stringify(updated));
-      console.log(`👻 Usunięto projekt ID ${projectId} z cache.`);
     }
   } catch (e) {
     console.error("Błąd aktualizacji cache:", e);
   }
 };
 
-export const fetchPipedriveProjects = async (apiKey: string, useMock: boolean): Promise<LogisticsProject[]> => {
+export const fetchPipedriveProjects = async (apiKey: string, useMock: boolean): Promise<LogisticsProject[] | null> => {
   if (useMock) {
-    console.log("Używanie danych testowych (Mock)...");
-    await new Promise(resolve => setTimeout(resolve, 1000));
     const projects: LogisticsProject[] = [];
     for (const mock of MOCK_PROJECTS) {
       const coords = await geocodeAddress(mock.address || "");
@@ -76,33 +68,15 @@ export const fetchPipedriveProjects = async (apiKey: string, useMock: boolean): 
   }
 
   try {
-    // --- KROK 1: POBIERANIE TABLIC (Boards) ---
-    console.log('🔍 1. Pobieram listę Tablic (Boards)...');
-    const boardsRes = await axios.get(`${PROXY_URL}https://api.pipedrive.com/v1/projects/boards?api_token=${apiKey}`);
+    const boardsRes = await axios.get(`${BASE_URL}/projects/boards?api_token=${apiKey}`);
     const allBoards = boardsRes.data.data || [];
     
-    console.log('📋 Dostępne tablice:', allBoards.map((b: any) => `[${b.id}] ${b.name}`));
-
-    // Znajdź ID tablic
     const transportBoard = allBoards.find((b: any) => /dostarczenie|delivery|transport/i.test(b.name));
     const serviceBoard = allBoards.find((b: any) => /serwis|service|naprawy|warsztat/i.test(b.name));
 
-    if (!transportBoard) console.warn('⚠️ Nie znaleziono tablicy "Dostarczenie"!');
-    else console.log(`✅ Tablica Transport: ${transportBoard.name} (ID: ${transportBoard.id})`);
-
-    if (!serviceBoard) console.error('❌ Nie znaleziono tablicy "Serwis"! Sprawdź nazwę w Pipedrive.');
-    else console.log(`✅ Tablica Serwis: ${serviceBoard.name} (ID: ${serviceBoard.id})`);
-
-    if (!transportBoard && !serviceBoard) {
-      throw new Error('Nie znaleziono ani tablicy transportowej, ani serwisowej.');
-    }
-
-    // --- KROK 2: POBIERANIE FAZ (Równolegle) ---
-    console.log('🔍 2. Pobieram Fazy...');
-    
     const fetchPhases = async (boardId: number | undefined) => {
       if (!boardId) return [];
-      const res = await axios.get(`${PROXY_URL}https://api.pipedrive.com/v1/projects/phases?board_id=${boardId}&api_token=${apiKey}`);
+      const res = await axios.get(`${BASE_URL}/projects/phases?board_id=${boardId}&api_token=${apiKey}`);
       return res.data.data || [];
     };
 
@@ -111,7 +85,6 @@ export const fetchPipedriveProjects = async (apiKey: string, useMock: boolean): 
       fetchPhases(serviceBoard?.id)
     ]);
 
-    // Filtrowanie Faz Transportowych
     const transportPhaseIds = transportPhasesAll
       .filter((p: any) => {
         const n = p.name.toLowerCase();
@@ -119,7 +92,6 @@ export const fetchPipedriveProjects = async (apiKey: string, useMock: boolean): 
       })
       .map((p: any) => p.id);
 
-    // Filtrowanie Faz Serwisowych (Szerokie filtrowanie)
     const serviceKeywords = ['usterki', 'diagnoza', 'rozwiązanie', 'termin', 'napraw', 'zgłoszenie'];
     const servicePhaseIds = servicePhasesAll
       .filter((p: any) => {
@@ -128,24 +100,12 @@ export const fetchPipedriveProjects = async (apiKey: string, useMock: boolean): 
       })
       .map((p: any) => p.id);
 
-    console.log(`⚙️ Fazy Transportowe ID: [${transportPhaseIds.join(', ')}]`);
-    if (serviceBoard) {
-      console.log(`⚙️ Wszystkie Fazy Serwisu:`, servicePhasesAll.map((p: any) => p.name));
-      console.log(`⚙️ Wybrane Fazy Serwisu ID: [${servicePhaseIds.join(', ')}]`);
-    }
-
-    // Mapa nazw faz dla UI
     const phaseNameMap: Record<number, string> = {};
     [...transportPhasesAll, ...servicePhasesAll].forEach((p: any) => phaseNameMap[p.id] = p.name);
 
-    // --- KROK 3: POBIERANIE WSZYSTKICH PROJEKTÓW ---
-    console.log('🔍 3. Pobieram Projekty (Limit 500)...');
-    const projectsRes = await axios.get(`${PROXY_URL}https://api.pipedrive.com/v1/projects?status=open&limit=500&api_token=${apiKey}`);
+    const projectsRes = await axios.get(`${BASE_URL}/projects?status=open&limit=500&api_token=${apiKey}`);
     const allProjects = projectsRes.data.data || [];
 
-    console.log(`📥 Pobrano ${allProjects.length} surowych projektów.`);
-
-    // --- KROK 4: KLASYFIKACJA I FILTROWANIE ---
     const validProjectsRaw = allProjects.filter((p: any) => {
       if (transportPhaseIds.includes(p.phase_id)) {
         p._detectedType = 'transport';
@@ -158,50 +118,28 @@ export const fetchPipedriveProjects = async (apiKey: string, useMock: boolean): 
       return false;
     });
 
-    console.log(`🎯 Po filtracji: ${validProjectsRaw.length} projektów (T: ${validProjectsRaw.filter((p: any) => p._detectedType === 'transport').length}, S: ${validProjectsRaw.filter((p: any) => p._detectedType === 'service').length})`);
-
-    // --- KROK 5: POBIERANIE ADRESÓW I GEOCODING (SEKWENCYJNIE) ---
-    console.log(`🐢 Rozpoczynam sekwencyjne geokodowanie ${validProjectsRaw.length} adresów...`);
-    
     const logisticsProjects: LogisticsProject[] = [];
-    let processedCount = 0;
-
-    // Używamy pętli for..of zamiast Promise.all, aby uniknąć "Failed to fetch"
-    // wynikającego z limitów API Nominatim (1 req/sec)
     for (const project of validProjectsRaw) {
-      processedCount++;
-      if (processedCount % 5 === 0) console.log(`📍 Przetworzono ${processedCount} / ${validProjectsRaw.length} projektów...`);
-
       let address = '';
       let phone = '';
       let clientName = 'Nieznany';
-      
-      // Pobierz ID osoby
       const personId = project.person_id?.value || project.person_id;
 
       if (personId) {
         try {
-          // Pipedrive API ma wyższy limit, ale sekwencyjne pobieranie jest bezpieczniejsze przy błędach sieci
-          const personRes = await axios.get(`${PROXY_URL}https://api.pipedrive.com/v1/persons/${personId}?api_token=${apiKey}`);
+          const personRes = await axios.get(`${BASE_URL}/persons/${personId}?api_token=${apiKey}`);
           const personData = personRes.data.data;
-          
           clientName = personData.name;
-          
-          // Logika Adresu
           address = personData[ADDRESS_HASH_KEY];
           if (!address && personData.org_id?.address) address = personData.org_id.address;
           if (!address && personData.postal_address) address = personData.postal_address;
-
           if (personData.phone?.length > 0) phone = personData.phone[0].value;
-
         } catch (e) {
           console.error(`Błąd pobierania osoby ID ${personId}`, e);
         }
       }
 
-      // GEOCODING (Funkcja geocodeAddress ma wbudowany delay)
       const coords = await geocodeAddress(address);
-
       logisticsProjects.push({
         id: project.id,
         title: project.title,
@@ -214,32 +152,26 @@ export const fetchPipedriveProjects = async (apiKey: string, useMock: boolean): 
         phaseName: phaseNameMap[project.phase_id] || 'Nieznana Faza',
         status: coords ? 'open' : 'geocoding_error',
         pipedriveLink: `https://${COMPANY_DOMAIN}.pipedrive.com/projects/${project.id}/plan`,
-        type: project._detectedType // Przypisz wykryty typ
+        type: project._detectedType
       });
     }
 
-    // --- CACHING START ---
-    // Jeśli udało się pobrać dane, zapisz je do cache
     if (logisticsProjects.length > 0) {
-      console.log(`💾 Zapisywanie ${logisticsProjects.length} projektów do LocalStorage`);
       localStorage.setItem(CACHE_KEY, JSON.stringify(logisticsProjects));
       localStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString());
     }
-    // --- CACHING END ---
 
     return logisticsProjects;
-
   } catch (error) {
     console.error('CRITICAL ERROR fetchPipedriveProjects:', error);
-    return [];
+    return null; // Zwracamy null zamiast pustej tablicy, aby App wiedziała, że to błąd sieci
   }
 };
 
 export const updatePersonAddress = async (personId: number, newAddress: string, apiKey: string, useMock: boolean): Promise<boolean> => {
   if (useMock) return true;
   try {
-    console.log(`Updating address for Person ID ${personId} to: ${newAddress}`);
-    await axios.put(`${PROXY_URL}https://api.pipedrive.com/v1/persons/${personId}?api_token=${apiKey}`, {
+    await axios.put(`${BASE_URL}/persons/${personId}?api_token=${apiKey}`, {
       [ADDRESS_HASH_KEY]: newAddress
     });
     return true;
@@ -249,30 +181,18 @@ export const updatePersonAddress = async (personId: number, newAddress: string, 
   }
 };
 
-/**
- * Moves the project to the next stage based on its type.
- * Transport -> "Maszyna u klienta" (Delivery Board)
- * Service -> "Wykonanie" (Service Board)
- */
 export const advanceProjectStage = async (
   projectId: number, 
   type: 'transport' | 'service',
   apiKey: string, 
   useMock: boolean
 ): Promise<boolean> => {
-  if (useMock) {
-    alert(`Tryb Mock: Projekt typu ${type} przesunięty do kolejnej fazy.`);
-    return true;
-  }
+  if (useMock) return true;
   
   try {
-    console.log(`🚀 Zamykam projekt ID ${projectId} typu: ${type.toUpperCase()}`);
-
-    // 1. Pobierz wszystkie tablice
-    const boardsRes = await axios.get(`${PROXY_URL}https://api.pipedrive.com/v1/projects/boards?api_token=${apiKey}`);
+    const boardsRes = await axios.get(`${BASE_URL}/projects/boards?api_token=${apiKey}`);
     const allBoards = boardsRes.data.data || [];
 
-    // 2. Określ cel (Board & Phase Regex)
     let boardPattern: RegExp;
     let phasePattern: RegExp;
 
@@ -284,35 +204,21 @@ export const advanceProjectStage = async (
       phasePattern = /wykonanie|zrealizowane|gotowe/i;
     }
 
-    // 3. Znajdź Tablicę
     const targetBoard = allBoards.find((b: any) => boardPattern.test(b.name));
-    if (!targetBoard) {
-        alert(`Nie znaleziono odpowiedniej tablicy dla typu ${type}.`);
-        return false;
-    }
+    if (!targetBoard) return false;
 
-    // 4. Znajdź Fazę
-    const phasesRes = await axios.get(`${PROXY_URL}https://api.pipedrive.com/v1/projects/phases?board_id=${targetBoard.id}&api_token=${apiKey}`);
+    const phasesRes = await axios.get(`${BASE_URL}/projects/phases?board_id=${targetBoard.id}&api_token=${apiKey}`);
     const targetPhase = phasesRes.data.data.find((p: any) => phasePattern.test(p.name));
 
-    if (!targetPhase) {
-        console.error('Dostępne fazy:', phasesRes.data.data.map((p:any) => p.name));
-        alert(`Nie znaleziono fazy docelowej dla typu ${type} (szukano wzorca: ${phasePattern}).`);
-        return false;
-    }
+    if (!targetPhase) return false;
 
-    console.log(`✅ Przesuwam do: Tablica [${targetBoard.name}] -> Faza [${targetPhase.name}]`);
-
-    // 5. Wykonaj Update
     await axios.put(
-      `${PROXY_URL}https://api.pipedrive.com/v1/projects/${projectId}?api_token=${apiKey}`, 
+      `${BASE_URL}/projects/${projectId}?api_token=${apiKey}`, 
       { phase_id: targetPhase.id }
     );
     return true;
-
   } catch (error: any) {
     console.error("Błąd API Pipedrive:", error);
-    alert('Błąd Pipedrive API: ' + (error.response?.data?.error || error.message));
     return false;
   }
 };

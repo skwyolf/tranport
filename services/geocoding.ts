@@ -1,40 +1,39 @@
-
 import { GeoLocation } from '../types';
 
 // Simple in-memory cache to avoid hammering the API during a session
 const geoCache: Record<string, GeoLocation | null> = {};
 
 /**
- * Geocodes an address using OpenStreetMap Nominatim API.
- * Note: In production, you should use a paid service or your own instance for high volume.
+ * Geocodes an address using proxied OpenStreetMap Nominatim API via Netlify.
  */
 export const geocodeAddress = async (address: string): Promise<GeoLocation | null> => {
   if (!address) return null;
   
-  // Check cache
-  if (geoCache[address]) {
-    return geoCache[address];
+  const trimmedAddress = address.trim();
+  if (geoCache[trimmedAddress]) {
+    return geoCache[trimmedAddress];
   }
 
-  const fetchWithRetry = async (useProxy: boolean) => {
-    const endpoint = 'https://nominatim.openstreetmap.org/search';
+  const fetchWithProxy = async () => {
     const params = new URLSearchParams({
-      q: address,
+      q: trimmedAddress,
       format: 'json',
       limit: '1',
-      countrycodes: 'pl', // Focus on Poland per requirements
+      countrycodes: 'pl',
       addressdetails: '1'
     });
 
-    let url = `${endpoint}?${params.toString()}`;
-    if (useProxy) {
-        url = `https://corsproxy.io/?${encodeURIComponent(url)}`;
-    }
-
-    // We do NOT set User-Agent here because browsers often block setting it in fetch,
-    // and it triggers complex CORS preflight requests that might fail.
-    // Nominatim will use the browser's Referer header.
-    const response = await fetch(url);
+    // Używamy proxy /geo skonfigurowanego w _redirects
+    const isNetlify = typeof window !== 'undefined' && (window.location.hostname.includes('netlify.app') || window.location.hostname !== 'localhost');
+    const url = isNetlify 
+      ? `/geo/search?${params.toString()}`
+      : `https://nominatim.openstreetmap.org/search?${params.toString()}`;
+    
+    const response = await fetch(url, {
+      headers: {
+        'Accept': 'application/json'
+      }
+    });
     
     if (!response.ok) {
       throw new Error(`HTTP status ${response.status}`);
@@ -43,31 +42,21 @@ export const geocodeAddress = async (address: string): Promise<GeoLocation | nul
   };
 
   try {
-    // Rate limit delay: Ensure we don't hit the API faster than 1 req/sec
-    // This delay happens BEFORE the request.
+    // Nominatim rate limit safety - wait at least 1 second between requests
     await new Promise(resolve => setTimeout(resolve, 1100));
 
-    let data;
-    try {
-        // First attempt: Direct
-        data = await fetchWithRetry(false);
-    } catch (directError) {
-        console.warn(`Direct geocoding failed for "${address}", retrying with proxy...`, directError);
-        // Second attempt: Via Proxy
-        await new Promise(resolve => setTimeout(resolve, 500));
-        data = await fetchWithRetry(true);
-    }
+    const data = await fetchWithProxy();
 
     if (data && data.length > 0) {
       const result: GeoLocation = {
         lat: parseFloat(data[0].lat),
         lng: parseFloat(data[0].lon)
       };
-      geoCache[address] = result;
+      geoCache[trimmedAddress] = result;
       return result;
     }
   } catch (error) {
-    console.error("Geocoding error for address:", address, error);
+    console.error("Geocoding error for address:", trimmedAddress, error);
   }
 
   return null;
